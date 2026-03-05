@@ -1,0 +1,95 @@
+@font-face {
+ font-family: "GowunBatang";
+ src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2108@1.1/GowunBatang-Regular.woff")
+  format("woff");
+ font-weight: normal;
+ font-display: swap;
+}
+
+@font-face {
+ font-family: "GowunBatang";
+ src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2108@1.1/GowunBatang-Bold.woff")
+  format("woff");
+ font-weight: 700;
+ font-display: swap;
+}
+
+* {
+ margin: 0;
+ padding: 0;
+ box-sizing: border-box;
+}
+
+:root {
+ --color-bg: #faf9f6;
+ --color-text: #2c2c2c;
+ --color-accent: #c9a962;
+ --color-border: #e0e0e0;
+ --color-text-light: #6b6b6b;
+ --max-width: 430px;
+ --font-serif: "GowunBatang", "Cormorant Garamond", Georgia, serif;
+ --font-sans: "Montserrat", sans-serif;
+}
+
+html {
+ scroll-behavior: smooth;
+}
+
+body {
+ font-family: var(--font-serif);
+ background-color: var(--color-bg);
+ color: var(--color-text);
+ line-height: 1.6;
+ min-height: 100vh;
+ -webkit-font-smoothing: antialiased;
+ -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+ width: 100%;
+ min-height: 100vh;
+ display: flex;
+ justify-content: center;
+ background-color: var(--color-bg);
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+ font-family: var(--font-serif);
+ font-weight: 400;
+ letter-spacing: 0.05em;
+}
+
+p {
+ font-family: var(--font-serif);
+ letter-spacing: 0.02em;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+ width: 4px;
+}
+
+::-webkit-scrollbar-track {
+ background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+ background: var(--color-border);
+ border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+ background: var(--color-accent);
+}
+
+/* Selection */
+::selection {
+ background-color: var(--color-accent);
+ color: white;
+}
