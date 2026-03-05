@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { put, list, del } from "@vercel/blob";
 
 interface Guest {
   id: number;
@@ -11,22 +12,30 @@ interface RSVPData {
   guests: Guest[];
 }
 
-const BLOB_STORE_URL = process.env.BLOB_STORE_URL || "";
-const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "";
-const BLOB_FILE_NAME = "rsvp-data.json";
+const BLOB_PREFIX = "rsvp-data";
 
 async function getData(): Promise<RSVPData> {
   try {
-    // Try to fetch existing data
-    const url = `${BLOB_STORE_URL}/${BLOB_FILE_NAME}`;
-    const response = await fetch(url);
+    const { blobs } = await list({ prefix: BLOB_PREFIX });
 
-    if (response.ok) {
-      const data = await response.json();
-      return data as RSVPData;
+    if (blobs.length === 0) {
+      return { guests: [] };
     }
 
-    return { guests: [] };
+    // Sort by uploadedAt descending to get the latest
+    const sortedBlobs = blobs.sort(
+      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    );
+
+    const latestBlob = sortedBlobs[0];
+    const response = await fetch(latestBlob.url);
+
+    if (!response.ok) {
+      return { guests: [] };
+    }
+
+    const data = await response.json();
+    return data as RSVPData;
   } catch (error) {
     console.error("Error reading RSVP data:", error);
     return { guests: [] };
@@ -34,28 +43,26 @@ async function getData(): Promise<RSVPData> {
 }
 
 async function saveData(data: RSVPData): Promise<void> {
-  const response = await fetch(
-    `https://blob.vercel-storage.com/${BLOB_FILE_NAME}`,
-    {
-      method: "PUT",
-      headers: {
-        "Authorization": `Bearer ${BLOB_READ_WRITE_TOKEN}`,
-        "Content-Type": "application/json",
-        "x-api-version": "7",
-      },
-      body: JSON.stringify(data),
-    }
-  );
+  // First, get existing blobs to clean up old ones
+  const { blobs } = await list({ prefix: BLOB_PREFIX });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Blob save error:", errorText);
-    throw new Error(`Failed to save data: ${response.status}`);
+  // Save new data
+  await put(`${BLOB_PREFIX}.json`, JSON.stringify(data, null, 2), {
+    access: "public",
+    contentType: "application/json",
+  });
+
+  // Delete old blobs to avoid accumulation
+  for (const blob of blobs) {
+    try {
+      await del(blob.url);
+    } catch (e) {
+      console.error("Error deleting old blob:", e);
+    }
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Enable CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -64,20 +71,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  // Check for required environment variables
-  if (!BLOB_READ_WRITE_TOKEN) {
-    console.error("BLOB_READ_WRITE_TOKEN is not set");
-    return res.status(500).json({ error: "Server configuration error" });
-  }
-
   try {
-    // GET - Retrieve all RSVPs
     if (req.method === "GET") {
       const data = await getData();
       return res.status(200).json(data);
     }
 
-    // POST - Add new RSVP
     if (req.method === "POST") {
       const { name, side, timestamp } = req.body;
 
@@ -101,7 +100,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       data.guests.push(newGuest);
       await saveData(data);
 
-      console.log(`New RSVP: ${name} (${side}'s side)`);
       return res.status(201).json({ success: true, guest: newGuest });
     }
 
@@ -110,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("RSVP API Error:", error);
     return res.status(500).json({
       error: "Internal server error",
-      details: error instanceof Error ? error.message : "Unknown error"
+      message: error instanceof Error ? error.message : "Unknown error",
     });
   }
 }

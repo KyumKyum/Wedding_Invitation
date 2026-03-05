@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { put, list, del } from "@vercel/blob";
 
 interface GuestbookMessage {
   id: number;
@@ -11,21 +12,30 @@ interface GuestbookData {
   messages: GuestbookMessage[];
 }
 
-const BLOB_STORE_URL = process.env.BLOB_STORE_URL || "";
-const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "";
-const BLOB_FILE_NAME = "guestbook-data.json";
+const BLOB_PREFIX = "guestbook-data";
 
 async function getData(): Promise<GuestbookData> {
   try {
-    const url = `${BLOB_STORE_URL}/${BLOB_FILE_NAME}`;
-    const response = await fetch(url);
+    const { blobs } = await list({ prefix: BLOB_PREFIX });
 
-    if (response.ok) {
-      const data = await response.json();
-      return data as GuestbookData;
+    if (blobs.length === 0) {
+      return { messages: [] };
     }
 
-    return { messages: [] };
+    // Sort by uploadedAt descending to get the latest
+    const sortedBlobs = blobs.sort(
+      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    );
+
+    const latestBlob = sortedBlobs[0];
+    const response = await fetch(latestBlob.url);
+
+    if (!response.ok) {
+      return { messages: [] };
+    }
+
+    const data = await response.json();
+    return data as GuestbookData;
   } catch (error) {
     console.error("Error reading guestbook data:", error);
     return { messages: [] };
@@ -33,28 +43,26 @@ async function getData(): Promise<GuestbookData> {
 }
 
 async function saveData(data: GuestbookData): Promise<void> {
-  const response = await fetch(
-    `https://blob.vercel-storage.com/${BLOB_FILE_NAME}`,
-    {
-      method: "PUT",
-      headers: {
-        "Authorization": `Bearer ${BLOB_READ_WRITE_TOKEN}`,
-        "Content-Type": "application/json",
-        "x-api-version": "7",
-      },
-      body: JSON.stringify(data),
-    }
-  );
+  // First, get existing blobs to clean up old ones
+  const { blobs } = await list({ prefix: BLOB_PREFIX });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Blob save error:", errorText);
-    throw new Error(`Failed to save data: ${response.status}`);
+  // Save new data
+  await put(`${BLOB_PREFIX}.json`, JSON.stringify(data, null, 2), {
+    access: "public",
+    contentType: "application/json",
+  });
+
+  // Delete old blobs to avoid accumulation
+  for (const blob of blobs) {
+    try {
+      await del(blob.url);
+    } catch (e) {
+      console.error("Error deleting old blob:", e);
+    }
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Set CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -63,20 +71,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  // Check for required environment variables
-  if (!BLOB_READ_WRITE_TOKEN) {
-    console.error("BLOB_READ_WRITE_TOKEN is not set");
-    return res.status(500).json({ error: "Server configuration error" });
-  }
-
   try {
-    // GET - Retrieve all messages
     if (req.method === "GET") {
       const data = await getData();
       return res.status(200).json(data);
     }
 
-    // POST - Add new message
     if (req.method === "POST") {
       const { nickname, message, timestamp } = req.body;
 
@@ -104,16 +104,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       data.messages.push(newMessage);
       await saveData(data);
 
-      console.log(`New guestbook message from: ${nickname}`);
       return res.status(201).json({ success: true, entry: newMessage });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
   } catch (error) {
-    console.error("Guestbook API error:", error);
+    console.error("Guestbook API Error:", error);
     return res.status(500).json({
       error: "Internal server error",
-      details: error instanceof Error ? error.message : "Unknown error"
+      message: error instanceof Error ? error.message : "Unknown error",
     });
   }
 }
