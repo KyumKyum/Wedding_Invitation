@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { put, list } from "@vercel/blob";
 
 interface Guest {
   id: number;
@@ -12,28 +11,46 @@ interface RSVPData {
   guests: Guest[];
 }
 
-const BLOB_NAME = "rsvp-data.json";
+const BLOB_STORE_URL = process.env.BLOB_STORE_URL || "";
+const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || "";
+const BLOB_FILE_NAME = "rsvp-data.json";
 
 async function getData(): Promise<RSVPData> {
   try {
-    const { blobs } = await list({ prefix: BLOB_NAME });
-    if (blobs.length === 0) {
-      return { guests: [] };
+    const url = `${BLOB_STORE_URL}/${BLOB_FILE_NAME}`;
+    const response = await fetch(url);
+
+    if (response.ok) {
+      const data = await response.json();
+      return data as RSVPData;
     }
-    const response = await fetch(blobs[0].url);
-    const data = await response.json();
-    return data as RSVPData;
+
+    return { guests: [] };
   } catch (error) {
-    console.error("Error reading data:", error);
+    console.error("Error reading RSVP data:", error);
     return { guests: [] };
   }
 }
 
 async function saveData(data: RSVPData): Promise<void> {
-  await put(BLOB_NAME, JSON.stringify(data), {
-    access: "public",
-    addRandomSuffix: false,
-  });
+  const response = await fetch(
+    `https://blob.vercel-storage.com/${BLOB_FILE_NAME}`,
+    {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${BLOB_READ_WRITE_TOKEN}`,
+        "Content-Type": "application/json",
+        "x-api-version": "7",
+      },
+      body: JSON.stringify(data),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Blob save error:", errorText);
+    throw new Error(`Failed to save data: ${response.status}`);
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -57,6 +74,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    if (!BLOB_READ_WRITE_TOKEN) {
+      console.error("BLOB_READ_WRITE_TOKEN is not set");
+      return res.status(500).json({ error: "Server configuration error" });
+    }
+
     const { id } = req.query;
 
     if (!id) {
@@ -77,6 +99,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ success: true, removed: removedGuest });
   } catch (error) {
     console.error("RSVP Delete Error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({
+      error: "Internal server error",
+      details: error instanceof Error ? error.message : "Unknown error"
+    });
   }
 }
