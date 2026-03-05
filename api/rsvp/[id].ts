@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { put, list, del } from "@vercel/blob";
+import { put, list } from "@vercel/blob";
 
 interface Guest {
   id: number;
@@ -12,23 +12,17 @@ interface RSVPData {
   guests: Guest[];
 }
 
-const BLOB_PREFIX = "rsvp-data";
+const BLOB_PATH = "rsvp-data.json";
 
 async function getData(): Promise<RSVPData> {
   try {
-    const { blobs } = await list({ prefix: BLOB_PREFIX });
+    const { blobs } = await list({ prefix: "rsvp-data" });
 
     if (blobs.length === 0) {
       return { guests: [] };
     }
 
-    // Sort by uploadedAt descending to get the latest
-    const sortedBlobs = blobs.sort(
-      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-    );
-
-    const latestBlob = sortedBlobs[0];
-    const response = await fetch(latestBlob.url);
+    const response = await fetch(blobs[0].url);
 
     if (!response.ok) {
       return { guests: [] };
@@ -43,23 +37,12 @@ async function getData(): Promise<RSVPData> {
 }
 
 async function saveData(data: RSVPData): Promise<void> {
-  // First, get existing blobs to clean up old ones
-  const { blobs } = await list({ prefix: BLOB_PREFIX });
-
-  // Save new data
-  await put(`${BLOB_PREFIX}.json`, JSON.stringify(data, null, 2), {
+  await put(BLOB_PATH, JSON.stringify(data, null, 2), {
     access: "public",
     contentType: "application/json",
+    addRandomSuffix: false,
+    allowOverwrite: true,
   });
-
-  // Delete old blobs to avoid accumulation
-  for (const blob of blobs) {
-    try {
-      await del(blob.url);
-    } catch (e) {
-      console.error("Error deleting old blob:", e);
-    }
-  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
